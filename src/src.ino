@@ -32,8 +32,8 @@ UTFT_Buttons buttons(&tft, &touch);
 extern uint8_t BigFont[];
 extern uint8_t SmallFont[];
 
-// SD card
-// SdFat SD;
+// SD
+SdFat SD;
 
 // File
 File sdFile;
@@ -54,10 +54,12 @@ const int LED_RELAY_PIN = 40;
 const int TRIG_PIN = A0;
 const int ECHO_PIN = A1;
 
+char sdContent[64];
 char keyInput[10];
 long randNumber;
-boolean tilt = true;
-boolean lighted = true;
+boolean tilt = false;
+boolean lighted = false;
+boolean drawerOut = false;
 
 void setup() {
 	// Setup serial monitor
@@ -66,6 +68,11 @@ void setup() {
 	// Setup fingerScanner scanner
 	fingerScanner.begin(57600);
 
+	// Setup SD card
+	while (!SD.begin(SS)) {
+		Serial.print(".");
+	}
+
 	// Setup TFT module
 	tft.InitLCD();
 	tft.clrScr();
@@ -73,13 +80,6 @@ void setup() {
 	// Setup touch
 	touch.InitTouch();
 	touch.setPrecision(PREC_MEDIUM);
-
-	// Setup sdFat
-	// Serial.print(F("Starting SD "));
-	// while (!SD.begin(SD_CHIP_SELECT_PIN)) {
-	//   Serial.print(F("."));
-	// }
-	// Serial.println(F("OK"));
 
 	// Setup pins
 	pinMode(ACTUATOR_LIFT_POSITIVE, OUTPUT);
@@ -97,13 +97,23 @@ void setup() {
 
 	Serial.println(F("Setting up..."));
 	delay(2000);
-	while (CheckHeight() != 16) {
+	while (CheckHeight() != 17) {
 		digitalWrite(ACTUATOR_LIFT_POSITIVE, HIGH);
 		digitalWrite(ACTUATOR_LIFT_NEGATIVE, LOW);
 	}
 	digitalWrite(ACTUATOR_LIFT_POSITIVE, LOW);
 	digitalWrite(ACTUATOR_LIFT_NEGATIVE, LOW);
 	Serial.println(F("OK"));
+
+	if (SD.exists("tilt.txt")) {
+		digitalWrite(ACTUATOR_TILT_POSITIVE, LOW);
+		digitalWrite(ACTUATOR_TILT_NEGATIVE, HIGH);
+		delay(18000);
+		digitalWrite(ACTUATOR_TILT_POSITIVE, LOW);
+		digitalWrite(ACTUATOR_TILT_NEGATIVE, LOW);
+
+		SD.remove("tilt.txt");
+	}
 
 	buttons.setTextFont(SmallFont);
 }
@@ -118,28 +128,37 @@ void DrawControl() {
 	tft.setColor(255, 255, 255);  // White
 	tft.fillRect(0, 0, 319, 239);
 
-	int btnTilt0 = buttons.addButton(70, 35, 70, 70, "0 deg");
-	int btnTilt15 = buttons.addButton(70, 150, 70, 70, "15 deg");
-	int btnLed = buttons.addButton(160, 35, 80, 70, "Led");
-	int btnLogout = buttons.addButton(160, 150, 70, 70, "Log out");
+	int btnTilt = buttons.addButton(10, 10, 290, 50, "15 or 0 deg");
+	int btnLed = buttons.addButton(10, 60, 290, 50, "Led on/off");
+	int btnLogout = buttons.addButton(10, 110, 290, 50, "Log out");
+	int btnDrawer = buttons.addButton(10, 160, 290, 50, "Drawer open/close");
 
 	buttons.drawButtons();
 
 	int pressedButton = buttons.checkButtons();
+
+	// Create file to cache actuator states
+	sdFile = SD.open("log.txt", FILE_WRITE);
+	if (!sdFile) {
+		Serial.println("Error opening sd file.");
+		return;
+	}
+	
+	sdFile.close();
+
 	while (1) {
 		if (touch.dataAvailable()) {
 			pressedButton = buttons.checkButtons();
-			// KIM: not tested
-			if (pressedButton == btnTilt0) {
-				Tilt();
-			}
-			else if (pressedButton == btnTilt15) {
+			if (pressedButton == btnTilt) {
 				Tilt();
 			}
 			else if (pressedButton == btnLed) {
 				LedChangeState();
 			}
 			else if (pressedButton == btnLogout) {
+				// Delete
+				SD.remove("log.txt");
+
 				buttons.deleteAllButtons();
 
 				tft.clrScr();
@@ -149,10 +168,23 @@ void DrawControl() {
 					digitalWrite(ACTUATOR_LIFT_POSITIVE, HIGH);
 					digitalWrite(ACTUATOR_LIFT_NEGATIVE, LOW);
 				}
+
 				digitalWrite(ACTUATOR_LIFT_POSITIVE, LOW);
 				digitalWrite(ACTUATOR_LIFT_NEGATIVE, LOW);
 
+				while (drawerOut) {
+					digitalWrite(DC_POSITIVE, LOW);
+					digitalWrite(DC_NEGATIVE, HIGH);
+					delay(4000);
+					digitalWrite(DC_POSITIVE, LOW);
+					digitalWrite(DC_NEGATIVE, LOW);
+					drawerOut = false;
+				}
+
 				DrawHome();
+			}
+			else if (pressedButton == btnDrawer) {
+				DrawerStateChange();
 			}
 		}
 	}
@@ -389,7 +421,7 @@ void DrawHome() {
 
 				DrawOnLogin();
 
-				while (!getFingerprintIDez());
+				while (getFingerprintIDez());
 
 				DrawOnLoginSuccess();
 
@@ -399,6 +431,10 @@ void DrawHome() {
 				buttons.deleteAllButtons();
 
 				DrawRegistration();
+
+				while (!getFingerprintEnroll());
+
+				DrawHome();
 			}
 		}
 	}
@@ -649,21 +685,31 @@ void Lift(int until) {
 
 void Tilt() {
 	if (tilt) {
-		digitalWrite(ACTUATOR_TILT_POSITIVE, HIGH);
-		digitalWrite(ACTUATOR_TILT_NEGATIVE, LOW);
-		delay(15000);
-		digitalWrite(ACTUATOR_TILT_POSITIVE, LOW);
-		digitalWrite(ACTUATOR_TILT_NEGATIVE, LOW);
-	}
-	else {
 		digitalWrite(ACTUATOR_TILT_POSITIVE, LOW);
 		digitalWrite(ACTUATOR_TILT_NEGATIVE, HIGH);
-		delay(15000);
+		delay(18000);
 		digitalWrite(ACTUATOR_TILT_POSITIVE, LOW);
 		digitalWrite(ACTUATOR_TILT_NEGATIVE, LOW);
+
+		SD.remove("tilt.txt");
+	}
+	else {
+		digitalWrite(ACTUATOR_TILT_POSITIVE, HIGH);
+		digitalWrite(ACTUATOR_TILT_NEGATIVE, LOW);
+		delay(18000);
+		digitalWrite(ACTUATOR_TILT_POSITIVE, LOW);
+		digitalWrite(ACTUATOR_TILT_NEGATIVE, LOW);
+
+		// Set SD card to writing mode/write new data
+		sdFile = SD.open("tilt.txt", FILE_WRITE);
+		if (!sdFile) {
+			Serial.println("Error opening sd file.");
+			return;
+		}
+
+		sdFile.close();
 	}
 
-	// Reverse boolean
 	tilt = !tilt;
 }
 
@@ -676,4 +722,23 @@ void LedChangeState() {
 	}
 
 	lighted = !lighted;
+}
+
+void DrawerStateChange() {
+	if (drawerOut) {
+		digitalWrite(DC_POSITIVE, LOW);
+		digitalWrite(DC_NEGATIVE, HIGH);
+		delay(4000);
+		digitalWrite(DC_POSITIVE, LOW);
+		digitalWrite(DC_NEGATIVE, LOW);
+	}
+	else {
+		digitalWrite(DC_POSITIVE, HIGH);
+		digitalWrite(DC_NEGATIVE, LOW);
+		delay(3000);
+		digitalWrite(DC_POSITIVE, LOW);
+		digitalWrite(DC_NEGATIVE, LOW);
+	}
+
+	drawerOut = !drawerOut;
 }
