@@ -17,7 +17,6 @@
 
 // Adafruit_Fingerprint
 Adafruit_Fingerprint fingerScanner = Adafruit_Fingerprint(&Serial3);
-int id;
 
 // Touch, touch coordinates
 URTouch touch(6, 5, 4, 3, 2);
@@ -53,10 +52,10 @@ const int SD_CHIP_SELECT_PIN = 53;
 const int LED_RELAY_PIN = 40;
 const int TRIG_PIN = A0;
 const int ECHO_PIN = A1;
+const int TABLE_LED_PIN = A2;
 
 char sdContent[64];
 char keyInput[10];
-long randNumber;
 boolean tilt = false;
 boolean lighted = false;
 boolean drawerOut = false;
@@ -90,14 +89,16 @@ void setup() {
 	pinMode(DC_NEGATIVE, OUTPUT);
 	pinMode(LED_RELAY_PIN, OUTPUT);
 	pinMode(TRIG_PIN, OUTPUT);
+	pinMode(TABLE_LED_PIN, OUTPUT);
 	pinMode(ECHO_PIN, INPUT);
 
+	digitalWrite(TABLE_LED_PIN, HIGH);
 	digitalWrite(DC_POSITIVE, LOW);
 	digitalWrite(DC_NEGATIVE, LOW);
 
 	Serial.println(F("Setting up..."));
 	delay(2000);
-	while (CheckHeight() != 17) {
+	while (CheckHeight() >= 17.25) {
 		digitalWrite(ACTUATOR_LIFT_POSITIVE, HIGH);
 		digitalWrite(ACTUATOR_LIFT_NEGATIVE, LOW);
 	}
@@ -164,7 +165,7 @@ void DrawControl() {
 				tft.clrScr();
 
 				// Default to lowest lift
-				while (CheckHeight() != 16) {
+				while (CheckHeight() >= 17.25) {
 					digitalWrite(ACTUATOR_LIFT_POSITIVE, HIGH);
 					digitalWrite(ACTUATOR_LIFT_NEGATIVE, LOW);
 				}
@@ -182,6 +183,12 @@ void DrawControl() {
 				}
 
 				DrawHome();
+
+				if (lighted) {
+					digitalWrite(TABLE_LED_PIN, HIGH);
+					lighted = false;
+				}
+
 			}
 			else if (pressedButton == btnDrawer) {
 				DrawerStateChange();
@@ -277,7 +284,7 @@ void DrawKeypad() {
 				tft.setBackColor(255, 255, 255);
 				tft.setColor(207, 68, 54);  // Red
 				tft.setFont(BigFont);
-				tft.print("", CENTER, 25);
+				tft.print("                  ", CENTER, 25);
 			}
 
 			// Avoid garbage display
@@ -314,6 +321,9 @@ void DrawRegistration() {
 
 void DrawRegistrationStart() {
 	tft.clrScr();
+
+	tft.setColor(255, 255, 255);   // White
+	tft.fillRect(0, 0, 319, 239);  // Fill the whole screen with white
 	// Status text
 	tft.setBackColor(255, 255, 255);
 	tft.setColor(207, 68, 54);  // Red
@@ -323,6 +333,9 @@ void DrawRegistrationStart() {
 
 void DrawRegistrationOnRemove() {
 	tft.clrScr();
+	
+	tft.setColor(255, 255, 255);   // White
+	tft.fillRect(0, 0, 319, 239);  // Fill the whole screen with white
 	// Status text
 	tft.setBackColor(255, 255, 255);
 	tft.setColor(207, 68, 54);  // Red
@@ -332,6 +345,9 @@ void DrawRegistrationOnRemove() {
 
 void DrawRegistrationOnPlace() {
 	tft.clrScr();
+	
+	tft.setColor(255, 255, 255);   // White
+	tft.fillRect(0, 0, 319, 239);  // Fill the whole screen with white
 	// Status text
 	tft.setBackColor(255, 255, 255);
 	tft.setColor(207, 68, 54);  // Red
@@ -341,6 +357,9 @@ void DrawRegistrationOnPlace() {
 
 void DrawRegistrationDone() {
 	tft.clrScr();
+
+	tft.setColor(255, 255, 255);   // White
+	tft.fillRect(0, 0, 319, 239);  // Fill the whole screen with white
 	// Status text
 	tft.setBackColor(255, 255, 255);
 	tft.setColor(207, 68, 54);  // Red
@@ -366,7 +385,7 @@ void DrawOnLogin() {
 	tft.setColor(207, 68, 54);  // Red
 	tft.setFont(SmallFont);
 	// Set location
-	tft.print("Please put your fingerScanner", CENTER, 60);
+	tft.print("Please put your finger", CENTER, 60);
 	tft.print("to the scanner", CENTER, 70);
 
 	buttons.deleteAllButtons();
@@ -421,7 +440,11 @@ void DrawHome() {
 
 				DrawOnLogin();
 
-				while (getFingerprintIDez());
+				while (1) {
+					if (getFingerprintIDez() != -1) {
+						break;
+					}
+				}
 
 				DrawOnLoginSuccess();
 
@@ -443,9 +466,11 @@ void DrawHome() {
 
 #pragma region FingerScanner
 uint8_t getFingerprintEnroll() {
-	// Generate random number for ID
-	randNumber = random(1000);
+	srand(millis());
 
+	int id = (rand() % 127) + 1;
+
+	Serial.println(id);
 	int p = -1;
 	while (p != FINGERPRINT_OK) {
 		// Change UI
@@ -557,7 +582,7 @@ uint8_t getFingerprintEnroll() {
 
 	// OK converted!
 	Serial.print("Creating model for #");
-	Serial.println(randNumber);
+	Serial.println(id);
 
 	p = fingerScanner.createModel();
 	if (p == FINGERPRINT_OK) {
@@ -577,10 +602,16 @@ uint8_t getFingerprintEnroll() {
 	}
 
 	Serial.print("ID ");
-	Serial.println(randNumber);
+	Serial.println(id);
 	p = fingerScanner.storeModel(id);
 	if (p == FINGERPRINT_OK) {
 		Serial.println("Stored!");
+
+		DrawRegistrationDone();
+
+		delay(1500);
+
+		return 1;
 	}
 	else if (p == FINGERPRINT_PACKETRECIEVEERR) {
 		Serial.println("Communication error");
@@ -598,8 +629,6 @@ uint8_t getFingerprintEnroll() {
 		Serial.println("Unknown error");
 		return p;
 	}
-
-	DrawRegistrationDone();
 }
 
 int getFingerprintIDez() {
@@ -621,7 +650,7 @@ int getFingerprintIDez() {
 }
 #pragma endregion
 
-int CheckHeight() {
+float CheckHeight() {
 	// Clears the trigPin
 	digitalWrite(TRIG_PIN, LOW);
 	delayMicroseconds(2);
@@ -632,7 +661,7 @@ int CheckHeight() {
 	// Reads the echoPin, returns the sound wave travel time in microseconds
 	long duration = pulseIn(ECHO_PIN, HIGH);
 	// Calculating the distance
-	int distance = duration * 0.034 / 2;
+	float distance = duration * 0.034 / 2;
 	// Prints the distance on the Serial Monitor
 	Serial.print("Distance: ");
 	Serial.println(distance);
@@ -642,12 +671,11 @@ int CheckHeight() {
 
 // h: height
 void ApplyHeight(char *input) {
-	// KIM: not tested
 	Serial.println("Applying height");
 	if (strstr(input, "4.11") != nullptr) {  // default. do nothing
 		Lift(18);
 	}
-	else if (strstr(input, "5.0") != nullptr || strstr(input, "5.1") != nullptr) {
+	else if (strstr(input, "5.0") != nullptr || strcmp(input, "5.1") == 0) {
 		Lift(20);
 	}
 	else if (strstr(input, "5.2") != nullptr) {
@@ -662,18 +690,18 @@ void ApplyHeight(char *input) {
 	else if (strstr(input, "5.7") != nullptr || strstr(input, "5.8") != nullptr) {
 		Lift(24);
 	}
-	else if (strstr(input, "5.9") != nullptr || strstr(input, "6.0") != nullptr) {
+	else if (strstr(input, "5.9") != nullptr || strcmp(input, "5.10") == 0) {
 		Lift(25);
 	}
-	else if (strstr(input, "6.1") != nullptr) {
+	else if (strcmp(input, "5.11") == 0) {
 		Lift(26);
 	}
 }
 
 // until: until the actuator reaches the assigned height in terms of time, h:
 // height
-void Lift(int until) {
-	while (CheckHeight() < until) {
+void Lift(float until) {
+	while (CheckHeight() <= until) {
 		Serial.println(CheckHeight());
 		digitalWrite(ACTUATOR_LIFT_POSITIVE, LOW);
 		digitalWrite(ACTUATOR_LIFT_NEGATIVE, HIGH);
@@ -715,10 +743,10 @@ void Tilt() {
 
 void LedChangeState() {
 	if (lighted) {
-		digitalWrite(LED_RELAY_PIN, HIGH);
+		digitalWrite(TABLE_LED_PIN, HIGH);
 	}
 	else {
-		digitalWrite(LED_RELAY_PIN, LOW);
+		digitalWrite(TABLE_LED_PIN, LOW);
 	}
 
 	lighted = !lighted;
@@ -728,14 +756,14 @@ void DrawerStateChange() {
 	if (drawerOut) {
 		digitalWrite(DC_POSITIVE, LOW);
 		digitalWrite(DC_NEGATIVE, HIGH);
-		delay(4000);
+		delay(2500);
 		digitalWrite(DC_POSITIVE, LOW);
 		digitalWrite(DC_NEGATIVE, LOW);
 	}
 	else {
 		digitalWrite(DC_POSITIVE, HIGH);
 		digitalWrite(DC_NEGATIVE, LOW);
-		delay(3000);
+		delay(2500);
 		digitalWrite(DC_POSITIVE, LOW);
 		digitalWrite(DC_NEGATIVE, LOW);
 	}
