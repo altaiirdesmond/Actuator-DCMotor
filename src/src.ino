@@ -1,6 +1,7 @@
-/* NOTE:
-
-    WORKING DO NOT REMOVE:
+/* Author:
+    kimaurellano
+    
+    WORKING CALIBRATION VALUES DO NOT CHANGE:
     #define CAL_X 0x003ACE81UL
     #define CAL_Y 0x039F0161UL
     #define CAL_S 0x000EF13FUL
